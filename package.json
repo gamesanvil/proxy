@@ -6,7 +6,9 @@
   "author": "alphasec",
   "license": "MIT",
   "dependencies": {
-    "express": "^4.19.2"
+    "axios": "^1.13.2",
+    "express": "^4.19.2",
+    "http-proxy": "^1.18.1"
   },
   "scripts": {
     "start": "node app.js"
