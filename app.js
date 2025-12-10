@@ -152,7 +152,7 @@ proxy.on('error', (err, req, res) => {
     }
 });
 
-server.listen(PROXY_PORT, () => {
+server.listen(PROXY_PORT, '::', () => {
     log(`Proxy server listening on port ${PROXY_PORT}`);
     log(`Target service DNS: ${COLYSEUS_INTERNAL_DNS}`);
     log(`Target port: ${COLYSEUS_PORT}`);
