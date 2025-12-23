@@ -73,7 +73,46 @@ async function discoverAndGetIp(podId) {
     return null;
 }
 
+async function checkColyseusHealth() {
+    let ips = [];
+    try {
+        const [ipv4, ipv6] = await Promise.all([
+            dns.resolve4(COLYSEUS_INTERNAL_DNS).catch(() => []),
+            dns.resolve6(COLYSEUS_INTERNAL_DNS).catch(() => []),
+        ]);
+        ips = [...new Set([...ipv4, ...ipv6])];
+    } catch (err) {
+        error(`[HEALTH DNS ERROR] ${err.message}`);
+        return false;
+    }
+
+    if (!ips.length) return false;
+
+    const results = await Promise.allSettled(
+        ips.map(async (ip) => {
+            const target = `http://${ip.includes(':') ? `[${ip}]` : ip}:${COLYSEUS_PORT}/health`;
+            await axios.get(target, { timeout: 2000 });
+            return true;
+        })
+    );
+
+    return results.some(r => r.status === 'fulfilled');
+}
+
+
 const server = http.createServer(async (req, res) => {
+    if (req.method === 'GET' && req.url === '/health') {
+        const ok = await checkColyseusHealth();
+        if (ok) {
+            res.writeHead(200);
+            res.end('OK');
+        } else {
+            res.writeHead(503);
+            res.end('Colyseus unhealthy');
+        }
+        return;
+    }
+
     const start = Date.now();
     const parsed = url.parse(req.url);
     const pathParts = parsed.pathname?.split('/').filter(Boolean) || [];
