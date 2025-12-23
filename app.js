@@ -73,7 +73,7 @@ async function discoverAndGetIp(podId) {
     return null;
 }
 
-async function checkColyseusHealth() {
+async function checkAllPodsHavePodId() {
     let ips = [];
     try {
         const [ipv4, ipv6] = await Promise.all([
@@ -81,34 +81,69 @@ async function checkColyseusHealth() {
             dns.resolve6(COLYSEUS_INTERNAL_DNS).catch(() => []),
         ]);
         ips = [...new Set([...ipv4, ...ipv6])];
+        log(`[HEALTH] Resolved IPs: ${ips.join(', ')}`);
     } catch (err) {
         error(`[HEALTH DNS ERROR] ${err.message}`);
-        return false;
+        return { ok: false, reason: 'dns_error' };
     }
 
-    if (!ips.length) return false;
+    if (!ips.length) {
+        return { ok: false, reason: 'no_ips' };
+    }
 
     const results = await Promise.allSettled(
         ips.map(async (ip) => {
-            const target = `http://${ip.includes(':') ? `[${ip}]` : ip}:${COLYSEUS_PORT}/health`;
-            await axios.get(target, { timeout: 2000 });
-            return true;
+            const target = `http://${ip.includes(':') ? `[${ip}]` : ip}:${COLYSEUS_PORT}/podid`;
+            const res = await axios.get(target, { timeout: 2000 });
+            const podId = res.data?.podId?.toString();
+
+            if (!podId) {
+                throw new Error('podId missing');
+            }
+
+            return { ip, podId };
         })
     );
 
-    return results.some(r => r.status === 'fulfilled');
+    const failed = results.filter(r => r.status === 'rejected');
+    const success = results
+        .filter(r => r.status === 'fulfilled')
+        .map(r => r.value);
+
+    if (failed.length > 0) {
+        error(`[HEALTH FAIL] ${failed.length}/${ips.length} pods unhealthy`);
+        return {
+            ok: false,
+            reason: 'some_pods_unhealthy',
+            success,
+        };
+    }
+
+    return {
+        ok: true,
+        pods: success,
+    };
 }
+
 
 
 const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && req.url === '/health') {
-        const ok = await checkColyseusHealth();
-        if (ok) {
-            res.writeHead(200);
-            res.end('OK');
+        const result = await checkAllPodsHavePodId();
+
+        if (result.ok) {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+                status: 'ok',
+                pods: result.pods,
+            }));
         } else {
-            res.writeHead(503);
-            res.end('Colyseus unhealthy');
+            res.writeHead(503, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+                status: 'unhealthy',
+                reason: result.reason,
+                pods: result.success || [],
+            }));
         }
         return;
     }
